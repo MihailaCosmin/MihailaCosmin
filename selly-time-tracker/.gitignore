@@ -1,0 +1,5 @@
+selly_tracker.db
+tracker.pid
+config.json
+raport*.csv
+__pycache__/
