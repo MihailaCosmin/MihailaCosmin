@@ -25,6 +25,38 @@ fiecare animatie. Aplicatia face automat partea repetitiva.
 - Genereaza optional un script Python pentru UE5 care importa tot ce a produs
   si poate rula si retargetul in bloc pe MetaHuman.
 
+## Pas cu pas pe Windows (de la zero la .exe)
+
+1. **Instaleaza Python** de pe [python.org](https://www.python.org/downloads/) -
+   la instalare bifeaza **"Add python.exe to PATH"**. E nevoie de el doar ca sa
+   construiesti executabilul, nu si ca sa il folosesti dupa aceea.
+2. **Instaleaza Blender** de pe [blender.org](https://www.blender.org/download/).
+3. **Descarca proiectul**: pe pagina repo-ului, butonul verde `Code` ->
+   `Download ZIP`. Dezarhiveaza arhiva (click-dreapta -> "Extract All").
+4. **Intra in folderul `mixamo2metahuman`** din arhiva dezarhivata. Acolo
+   trebuie sa vezi fisierul `build_exe.bat`.
+5. **Dublu-click pe `build_exe.bat`**. Se deschide o fereastra neagra care
+   descarca ce trebuie, ruleaza testele si construieste executabilul. Dureaza
+   1-3 minute. Cand scrie "Gata", apesi o tasta ca sa se inchida.
+6. Executabilul e in `dist\Mixamo2MetaHuman\` - copiezi tot folderul unde vrei
+   (de exemplu pe `D:\Proiecte`) si pornesti `Mixamo2MetaHuman.exe`.
+
+**Varianta cu copiere automata**, daca vrei sa sara peste pasul 6: in folderul
+`mixamo2metahuman`, dai click pe bara de adresa din Explorer (unde scrie calea),
+scrii `cmd` si apesi Enter. Se deschide linia de comanda **fix in acel folder**.
+Acolo scrii:
+
+```bat
+build_exe.bat D:\Proiecte
+```
+
+si folderul ajunge singur pe `D:\Proiecte\Mixamo2MetaHuman`. Inlocuieste
+`D:\Proiecte` cu diskul si folderul tau.
+
+> Nu ai nevoie de linia de comanda decat daca vrei copierea automata.
+> Dublu-click pe `build_exe.bat` face acelasi lucru, doar ca lasa folderul
+> in `dist\`.
+
 ## Cerinte
 
 | Ce | De ce |
