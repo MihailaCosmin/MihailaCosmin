@@ -21,6 +21,10 @@ from .settings import ConversionSettings
 
 SCRIPT_NAME = "blender_ops.py"
 
+#: Fisierele care trebuie sa ajunga pe disc langa executabil: Blender le
+#: ruleaza ca scripturi, deci nu pot fi compilate in interiorul unui .exe.
+SCRIPT_FILES = (SCRIPT_NAME, "bone_map.py")
+
 #: Locuri uzuale de instalare, verificate cand blender nu e in PATH.
 _CANDIDATE_GLOBS = {
     "win32": [
@@ -45,8 +49,68 @@ class BlenderNotFound(RuntimeError):
     pass
 
 
-def find_blender(explicit: str = "") -> str:
-    """Calea executabilului Blender. Ridica BlenderNotFound daca nu il gaseste."""
+def script_path():
+    """Calea catre `blender_ops.py`, si cand aplicatia ruleaza ca executabil.
+
+    PyInstaller dezarhiveaza fisierele de date intr-un folder temporar
+    (`sys._MEIPASS`), asa ca il verificam si pe acela, plus folderul de langa
+    executabil pentru build-urile "onedir".
+    """
+    candidates = [Path(__file__).with_name(SCRIPT_NAME)]
+    bundle = getattr(sys, "_MEIPASS", "")
+    if bundle:
+        candidates.append(Path(bundle) / "mixamo2mh" / SCRIPT_NAME)
+        candidates.append(Path(bundle) / SCRIPT_NAME)
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "mixamo2mh" / SCRIPT_NAME)
+        candidates.append(exe_dir / SCRIPT_NAME)
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        "Lipseste scriptul de Blender (%s). Cautat in: %s"
+        % (SCRIPT_NAME, ", ".join(str(c) for c in candidates))
+    )
+
+
+#: Numele executabilului, pentru un Blender portabil pus langa aplicatie.
+_PORTABLE_NAMES = (
+    "blender.exe",
+    "blender",
+    os.path.join("Contents", "MacOS", "Blender"),   # Blender.app pe macOS
+)
+
+#: Subfoldere in care il cautam.
+_PORTABLE_DIRS = (".", "Blender", "blender", "Blender.app")
+
+
+def app_dirs() -> List[Path]:
+    """Folderele "de langa aplicatie", si cand ruleaza ca executabil."""
+    roots = [Path(__file__).resolve().parents[1]]
+    if getattr(sys, "frozen", False):
+        roots.insert(0, Path(sys.executable).resolve().parent)
+    return roots
+
+
+def find_portable(roots: Optional[List[Path]] = None) -> str:
+    """Cauta un Blender portabil adus langa aplicatie (folderul e autonom)."""
+    for root in roots if roots is not None else app_dirs():
+        for folder in _PORTABLE_DIRS:
+            for name in _PORTABLE_NAMES:
+                candidate = Path(root) / folder / name
+                if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                    return str(candidate)
+    return ""
+
+
+def find_blender(explicit: str = "", roots: Optional[List[Path]] = None) -> str:
+    """Calea executabilului Blender. Ridica BlenderNotFound daca nu il gaseste.
+
+    Ordinea: calea data explicit, variabila BLENDER_PATH, un Blender portabil
+    de langa aplicatie, PATH-ul sistemului, apoi locurile uzuale de instalare.
+    """
     if explicit:
         if Path(explicit).is_file() and os.access(explicit, os.X_OK):
             return explicit
@@ -55,6 +119,10 @@ def find_blender(explicit: str = "") -> str:
     env = os.environ.get("BLENDER_PATH", "")
     if env and Path(env).is_file():
         return env
+
+    portable = find_portable(roots)
+    if portable:
+        return portable
 
     found = shutil.which("blender")
     if found:
@@ -120,9 +188,7 @@ def run_conversion(
     version = blender_version(executable)
     emit(f"Blender: {executable}" + (f" ({version})" if version else ""))
 
-    script = Path(__file__).with_name(SCRIPT_NAME)
-    if not script.is_file():
-        raise FileNotFoundError(f"Lipseste scriptul de Blender: {script}")
+    script = script_path()
 
     Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 

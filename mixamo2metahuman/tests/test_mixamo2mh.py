@@ -10,7 +10,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mixamo2mh import unreal_script
-from mixamo2mh.blender import _tail, collect_fbx, find_blender, BlenderNotFound
+from mixamo2mh.blender import (
+    _tail,
+    collect_fbx,
+    find_blender,
+    find_portable,
+    BlenderNotFound,
+)
 from mixamo2mh.bone_map import (
     MIXAMO_TO_UE5,
     build_rename_map,
@@ -173,6 +179,31 @@ class TestBlenderHelpers(unittest.TestCase):
 
     def test_tail_keeps_last_lines(self):
         self.assertEqual(_tail("a\n\nb\nc", lines=2), "b | c")
+
+    def test_portable_blender_is_found_next_to_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            portable = Path(tmp) / "Blender" / "blender"
+            portable.parent.mkdir()
+            portable.write_text("#!/bin/sh\n")
+            portable.chmod(0o755)
+            self.assertEqual(find_portable([Path(tmp)]), str(portable))
+            self.assertEqual(find_blender(roots=[Path(tmp)]), str(portable))
+
+    def test_portable_lookup_ignores_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(find_portable([Path(tmp)]), "")
+
+    def test_portable_lookup_ignores_non_executable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "blender"
+            fake.write_text("nu sunt executabil")
+            fake.chmod(0o644)
+            self.assertEqual(find_portable([Path(tmp)]), "")
+
+    def test_script_path_points_to_blender_ops(self):
+        from mixamo2mh.blender import script_path
+        self.assertEqual(script_path().name, "blender_ops.py")
+        self.assertTrue(script_path().is_file())
 
     def test_blender_script_exists(self):
         script = Path(__file__).resolve().parents[1] / "mixamo2mh" / "blender_ops.py"

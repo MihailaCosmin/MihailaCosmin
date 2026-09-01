@@ -86,6 +86,37 @@ anterior. Sau rulezi scriptul generat: `Tools > Execute Python Script...` ->
 (sectiunea Root Motion) si, daca folosesti Animation Blueprint, `Root Motion
 Mode = Root Motion from Montages/Everything`.
 
+## Executabil (.exe) si folder gata de copiat
+
+Ca sa nu ai nevoie de Python pe calculatorul unde folosesti aplicatia:
+
+```bat
+build_exe.bat                 :: construieste in dist\Mixamo2MetaHuman
+build_exe.bat D:\Proiecte      :: si copiaza folderul pe D:\Proiecte
+```
+
+Pe Linux/macOS: `./build_exe.sh [destinatie]`.
+
+Scriptul isi face singur un mediu virtual, instaleaza PyInstaller, ruleaza
+testele si abia apoi construieste. Rezulta un folder cu:
+
+```
+Mixamo2MetaHuman/
+    Mixamo2MetaHuman.exe        aplicatia cu interfata (dublu-click)
+    mixamo2mh-cli.exe           aceleasi optiuni, din linia de comanda
+    Citeste-ma.txt              pornire rapida
+    README.md                   manualul asta
+    Exemple/                    model de script de import pentru UE5
+```
+
+Un `.exe` de Windows se construieste **pe Windows** - PyInstaller nu face
+cross-compile. Acelasi script ruleaza si pe Linux/macOS, dar produce
+executabilul pentru sistemul pe care l-ai rulat.
+
+Blender ramane necesar si langa executabil. Daca vrei folderul complet
+portabil, pune un Blender portabil in subfolderul `Blender/` de langa `.exe` -
+aplicatia il gaseste automat, inaintea celui instalat in sistem.
+
 ## Linia de comanda
 
 Aceleasi optiuni, fara interfata:

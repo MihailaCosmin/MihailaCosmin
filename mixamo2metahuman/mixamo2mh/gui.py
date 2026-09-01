@@ -83,7 +83,7 @@ class App(tk.Tk):
         )
         ttk.Label(
             box,
-            text="Conversia foloseste Blender in fundal (3.x sau 4.x, gratuit de pe blender.org).",
+            text="Conversia foloseste Blender in fundal (3.x, 4.x sau 5.x, gratuit de pe blender.org).",
             foreground="#666",
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
         return box
