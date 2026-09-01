@@ -1,7 +1,9 @@
 """Teste pentru partea care nu are nevoie de Blender."""
 
 import ast
+import contextlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -15,6 +17,7 @@ from mixamo2mh.blender import (
     collect_fbx,
     find_blender,
     find_portable,
+    is_runnable,
     BlenderNotFound,
 )
 from mixamo2mh.bone_map import (
@@ -180,12 +183,19 @@ class TestBlenderHelpers(unittest.TestCase):
     def test_tail_keeps_last_lines(self):
         self.assertEqual(_tail("a\n\nb\nc", lines=2), "b | c")
 
+    def _portable(self, folder, name, executable=True):
+        """Creeaza un fals Blender si returneaza calea lui."""
+        path = Path(folder) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755 if executable else 0o644)
+        return path
+
     def test_portable_blender_is_found_next_to_app(self):
+        # numele difera intre sisteme, asa ca verificam ce e valid pe fiecare
+        name = "Blender/blender.exe" if os.name == "nt" else "Blender/blender"
         with tempfile.TemporaryDirectory() as tmp:
-            portable = Path(tmp) / "Blender" / "blender"
-            portable.parent.mkdir()
-            portable.write_text("#!/bin/sh\n")
-            portable.chmod(0o755)
+            portable = self._portable(tmp, name)
             self.assertEqual(find_portable([Path(tmp)]), str(portable))
             self.assertEqual(find_blender(roots=[Path(tmp)]), str(portable))
 
@@ -193,12 +203,30 @@ class TestBlenderHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(find_portable([Path(tmp)]), "")
 
-    def test_portable_lookup_ignores_non_executable(self):
+    def test_windows_needs_an_exe_extension(self):
+        """Pe Windows executabilitatea vine din extensie, nu din permisiuni."""
         with tempfile.TemporaryDirectory() as tmp:
-            fake = Path(tmp) / "blender"
-            fake.write_text("nu sunt executabil")
-            fake.chmod(0o644)
-            self.assertEqual(find_portable([Path(tmp)]), "")
+            self._portable(tmp, "Blender/blender")          # fara .exe
+            self.assertEqual(find_portable([Path(tmp)], windows=True), "")
+            exe = self._portable(tmp, "Blender/blender.exe")
+            self.assertEqual(find_portable([Path(tmp)], windows=True), str(exe))
+
+    def test_posix_needs_the_execute_bit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = self._portable(tmp, "Blender/blender", executable=False)
+            self.assertEqual(find_portable([Path(tmp)], windows=False), "")
+            plain.chmod(0o755)
+            self.assertEqual(find_portable([Path(tmp)], windows=False), str(plain))
+
+    def test_no_window_flag_is_inert_off_windows(self):
+        from mixamo2mh.blender import NO_WINDOW
+        self.assertIsInstance(NO_WINDOW, int)
+        if os.name != "nt":
+            self.assertEqual(NO_WINDOW, 0)
+
+    def test_is_runnable_on_missing_file(self):
+        self.assertFalse(is_runnable("/nu/exista/blender", windows=True))
+        self.assertFalse(is_runnable("/nu/exista/blender", windows=False))
 
     def test_script_path_points_to_blender_ops(self):
         from mixamo2mh.blender import script_path
@@ -267,8 +295,9 @@ class TestCli(unittest.TestCase):
         self.assertEqual(settings.inputs, [str(self.fbx)])
 
     def test_missing_output_is_rejected(self):
-        with self.assertRaises(SystemExit):
-            build_parser().parse_args([str(self.fbx)])
+        with open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet):
+            with self.assertRaises(SystemExit):
+                build_parser().parse_args([str(self.fbx)])
 
 
 if __name__ == "__main__":

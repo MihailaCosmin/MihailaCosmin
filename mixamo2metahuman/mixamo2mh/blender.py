@@ -21,6 +21,10 @@ from .settings import ConversionSettings
 
 SCRIPT_NAME = "blender_ops.py"
 
+#: Pe Windows, un executabil fara consola ar deschide cate o fereastra neagra
+#: pentru fiecare Blender pornit. Steagul o suprima; pe restul e 0 (ignorat).
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 #: Fisierele care trebuie sa ajunga pe disc langa executabil: Blender le
 #: ruleaza ca scripturi, deci nu pot fi compilate in interiorul unui .exe.
 SCRIPT_FILES = (SCRIPT_NAME, "bone_map.py")
@@ -85,6 +89,25 @@ _PORTABLE_NAMES = (
 #: Subfoldere in care il cautam.
 _PORTABLE_DIRS = (".", "Blender", "blender", "Blender.app")
 
+#: Pe Windows "se poate executa" inseamna extensia potrivita: acolo nu exista
+#: bit de executie, iar os.access(..., X_OK) raspunde True pentru orice fisier.
+_WINDOWS_SUFFIXES = (".exe", ".bat", ".cmd", ".com")
+
+
+def is_runnable(path, windows: Optional[bool] = None) -> bool:
+    """Spune daca fisierul poate fi pornit ca program pe sistemul curent.
+
+    ``windows`` exista ca sa putem testa ambele comportamente pe orice sistem.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    candidate = Path(path)
+    if not candidate.is_file():
+        return False
+    if windows:
+        return candidate.suffix.lower() in _WINDOWS_SUFFIXES
+    return os.access(str(candidate), os.X_OK)
+
 
 def app_dirs() -> List[Path]:
     """Folderele "de langa aplicatie", si cand ruleaza ca executabil."""
@@ -94,13 +117,15 @@ def app_dirs() -> List[Path]:
     return roots
 
 
-def find_portable(roots: Optional[List[Path]] = None) -> str:
+def find_portable(
+    roots: Optional[List[Path]] = None, windows: Optional[bool] = None
+) -> str:
     """Cauta un Blender portabil adus langa aplicatie (folderul e autonom)."""
     for root in roots if roots is not None else app_dirs():
         for folder in _PORTABLE_DIRS:
             for name in _PORTABLE_NAMES:
                 candidate = Path(root) / folder / name
-                if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                if is_runnable(candidate, windows):
                     return str(candidate)
     return ""
 
@@ -121,6 +146,7 @@ def find_blender(explicit: str = "", roots: Optional[List[Path]] = None) -> str:
         return env
 
     portable = find_portable(roots)
+
     if portable:
         return portable
 
@@ -154,6 +180,7 @@ def blender_version(executable: str) -> str:
         out = subprocess.run(
             [executable, "--version"],
             capture_output=True, text=True, timeout=60, check=False,
+            creationflags=NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -239,7 +266,8 @@ def _run_one(
             "--python", str(script),
             "--", "--job", str(job_file), "--report", str(report_file),
         ]
-        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+        proc = subprocess.run(command, capture_output=True, text=True, check=False,
+                              creationflags=NO_WINDOW)
 
         report = {}
         if report_file.is_file():
