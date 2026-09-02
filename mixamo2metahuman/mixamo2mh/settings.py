@@ -51,6 +51,10 @@ class ConversionSettings:
 
         if not self.output_dir:
             problems.append("Nu ai ales folderul de iesire.")
+        elif Path(self.output_dir).exists() and not Path(self.output_dir).is_dir():
+            problems.append(
+                "Folderul de iesire e de fapt un fisier: %s" % self.output_dir
+            )
 
         if self.mode not in MODES:
             problems.append(f"Mod necunoscut: {self.mode}")
@@ -60,6 +64,13 @@ class ConversionSettings:
             problems.append(
                 "Extragerea root motion cere si adaugarea osului 'root'."
             )
+        if self.root_motion != ROOT_KEEP and not self.rename_bones:
+            # root motion se sprijina pe osul "pelvis", care apare abia dupa
+            # redenumire; fara ea, conversia ar esua la fiecare fisier
+            problems.append(
+                "Optiunile de root motion cer redenumirea oaselor "
+                "(fara ea nu exista osul 'pelvis')."
+            )
         if self.scale <= 0:
             problems.append("Scala trebuie sa fie un numar pozitiv.")
 
@@ -68,6 +79,30 @@ class ConversionSettings:
     def output_path(self, source: str) -> Path:
         """Calea fisierului rezultat pentru un FBX sursa."""
         return Path(self.output_dir) / f"{Path(source).stem}{self.suffix}.fbx"
+
+    def output_paths(self) -> Dict[str, Path]:
+        """Cate o cale de iesire pentru fiecare intrare, garantat distincte.
+
+        Doua fisiere pot avea acelasi nume in foldere diferite
+        (`walk/Walking.fbx` si `run/Walking.fbx`); fara asta al doilea l-ar
+        suprascrie pe primul, iar amandoua ar raporta succes.
+        """
+        planned: Dict[str, Path] = {}
+        taken = set()
+        for source in self.inputs:
+            path = self.output_path(source)
+            if path in taken:
+                parent = Path(source).parent.name or "fisier"
+                stem = Path(source).stem
+                path = Path(self.output_dir) / f"{parent}_{stem}{self.suffix}.fbx"
+                index = 2
+                while path in taken:
+                    path = (Path(self.output_dir)
+                            / f"{stem}_{index}{self.suffix}.fbx")
+                    index += 1
+            taken.add(path)
+            planned[source] = path
+        return planned
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)

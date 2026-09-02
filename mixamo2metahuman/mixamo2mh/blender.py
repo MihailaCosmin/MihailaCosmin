@@ -137,8 +137,18 @@ def find_blender(explicit: str = "", roots: Optional[List[Path]] = None) -> str:
     de langa aplicatie, PATH-ul sistemului, apoi locurile uzuale de instalare.
     """
     if explicit:
-        if Path(explicit).is_file() and os.access(explicit, os.X_OK):
+        chosen = Path(explicit)
+        if is_runnable(chosen):
             return explicit
+        if chosen.is_dir():
+            # din dialog se alege deseori folderul: "Blender.app" pe macOS sau
+            # folderul unui Blender portabil pe Windows
+            inside = find_portable([chosen])
+            if inside:
+                return inside
+            raise BlenderNotFound(
+                f"In folderul ales nu e niciun Blender: {explicit}"
+            )
         raise BlenderNotFound(f"Calea data catre Blender nu e valida: {explicit}")
 
     env = os.environ.get("BLENDER_PATH", "")
@@ -192,6 +202,7 @@ class FileResult:
     source: str
     output: str = ""
     ok: bool = False
+    skipped: bool = False
     message: str = ""
     renamed_bones: int = 0
     unmapped_bones: List[str] = None  # type: ignore[assignment]
@@ -199,6 +210,16 @@ class FileResult:
     def __post_init__(self) -> None:
         if self.unmapped_bones is None:
             self.unmapped_bones = []
+
+    @property
+    def failed(self) -> bool:
+        """Doar esecurile reale; un fisier sarit deliberat nu e o eroare."""
+        return not self.ok and not self.skipped
+
+    @property
+    def usable(self) -> bool:
+        """Exista un FBX bun pe disc pentru aceasta intrare."""
+        return self.ok or self.skipped
 
 
 def run_conversion(
@@ -219,11 +240,14 @@ def run_conversion(
 
     Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 
+    planned = settings.output_paths()
     results: List[FileResult] = []
     total = len(settings.inputs)
     for index, source in enumerate(settings.inputs, start=1):
         emit(f"[{index}/{total}] {Path(source).name}")
-        results.append(_run_one(executable, script, settings, source, emit))
+        results.append(
+            _run_one(executable, script, settings, source, planned[source], emit)
+        )
     return results
 
 
@@ -232,12 +256,13 @@ def _run_one(
     script: Path,
     settings: ConversionSettings,
     source: str,
+    output: Path,
     emit: Callable[[str], None],
 ) -> FileResult:
-    output = settings.output_path(source)
     result = FileResult(source=source, output=str(output))
 
     if output.exists() and not settings.overwrite:
+        result.skipped = True
         result.message = "Sarit: fisierul exista deja (overwrite dezactivat)."
         emit("    " + result.message)
         return result

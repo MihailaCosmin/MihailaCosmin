@@ -78,28 +78,38 @@ def main(argv: Optional[List[str]] = None) -> int:
     except BlenderNotFound as exc:
         print("Eroare: " + str(exc), file=sys.stderr)
         return 3
+    except (OSError, FileNotFoundError) as exc:
+        # folder de iesire imposibil de creat, drepturi lipsa, script lipsa...
+        print("Eroare: " + str(exc), file=sys.stderr)
+        return 4
 
     ok = [r for r in results if r.ok]
-    print("\nGata: %d din %d fisiere convertite." % (len(ok), len(results)))
-    for result in results:
-        if not result.ok:
-            print("  esuat: %s (%s)" % (Path(result.source).name, result.message))
+    skipped = [r for r in results if r.skipped]
+    failed = [r for r in results if r.failed]
+    usable = [r for r in results if r.usable]
 
-    if args.unreal_script and ok:
+    summary = "\nGata: %d din %d fisiere convertite." % (len(ok), len(results))
+    if skipped:
+        summary += " %d sarite (existau deja)." % len(skipped)
+    print(summary)
+    for result in failed:
+        print("  esuat: %s (%s)" % (Path(result.source).name, result.message))
+
+    if args.unreal_script and usable:
         target = (
             Path(settings.output_dir) / "unreal_import.py"
             if args.unreal_script == "auto" else Path(args.unreal_script)
         )
         unreal_script.write(
             target,
-            [r.output for r in ok],
+            [r.output for r in usable],
             destination=args.ue_content_path,
             import_as_animation=(settings.mode == MODE_ANIMATION),
             skeleton_path=args.ue_skeleton,
         )
         print("Script pentru UE5: %s" % target)
 
-    return 0 if len(ok) == len(results) else 1
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

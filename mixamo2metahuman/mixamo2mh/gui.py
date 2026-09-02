@@ -301,17 +301,21 @@ class App(tk.Tk):
         try:
             results = run_conversion(settings, log=lambda m: self.messages.put(("log", m)))
             done = [r for r in results if r.ok]
+            usable = [r for r in results if r.usable]
+            failed = [r for r in results if r.failed]
 
-            if want_ue_script and done:
+            if want_ue_script and usable:
                 target = Path(settings.output_dir) / "unreal_import.py"
                 unreal_script.write(
                     target,
-                    [r.output for r in done],
+                    [r.output for r in usable],
                     import_as_animation=(settings.mode == MODE_ANIMATION),
                 )
                 self.messages.put(("log", "Script pentru UE5: %s" % target))
 
-            self.messages.put(("done", (len(done), len(results))))
+            self.messages.put(
+                ("done", (len(done), len(results), len(usable) - len(done), len(failed)))
+            )
         except BlenderNotFound as exc:
             self.messages.put(("error", str(exc)))
         except Exception as exc:
@@ -331,13 +335,16 @@ class App(tk.Tk):
                 if payload.startswith("["):
                     self.progress.step(1)
             elif kind == "done":
-                done, total = payload
-                self._finish("Gata: %d din %d fisiere convertite." % (done, total))
-                if done < total:
+                done, total, skipped, failed = payload
+                status = "Gata: %d din %d fisiere convertite." % (done, total)
+                if skipped:
+                    status += " %d sarite (existau deja)." % skipped
+                self._finish(status)
+                if failed:
                     messagebox.showwarning(
                         APP_TITLE,
                         "%d fisiere nu au putut fi convertite. Detalii in jurnal."
-                        % (total - done),
+                        % failed,
                     )
             elif kind == "error":
                 self._finish("Eroare.")

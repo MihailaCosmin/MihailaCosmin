@@ -233,7 +233,29 @@ class TestRunConversion(unittest.TestCase):
         settings.overwrite = False
         results = run_conversion(settings, log=lambda _m: None)
         self.assertFalse(results[0].ok)
+        self.assertTrue(results[0].skipped)
+        self.assertFalse(results[0].failed, "sarirea deliberata nu e o eroare")
+        self.assertTrue(results[0].usable, "fisierul existent ramane bun de folosit")
         self.assertIn("exista deja", results[0].message)
+
+    def test_same_file_name_in_two_folders_produces_two_files(self):
+        walk = self.dir / "walk"
+        run = self.dir / "run"
+        for folder in (walk, run):
+            folder.mkdir()
+            fixture_mixamo.build(str(folder / "Walking.fbx"))
+
+        out = self.dir / "export4"
+        settings = ConversionSettings(
+            inputs=[str(walk / "Walking.fbx"), str(run / "Walking.fbx")],
+            output_dir=str(out), blender=str(self.fake),
+        )
+        results = run_conversion(settings, log=lambda _m: None)
+
+        self.assertTrue(all(r.ok for r in results), [r.message for r in results])
+        produced = sorted(p.name for p in out.glob("*.fbx"))
+        self.assertEqual(len(produced), 2, "al doilea fisier l-a suprascris pe primul")
+        self.assertEqual(produced, ["Walking_UE5.fbx", "run_Walking_UE5.fbx"])
 
 
 if __name__ == "__main__":

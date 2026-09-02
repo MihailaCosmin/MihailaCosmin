@@ -101,21 +101,30 @@ def build_rename_map(
     Numele care ar intra in coliziune cu unul deja alocat sunt sarite, ca sa
     nu stricam ierarhia scheletului.
     """
+    names = list(bone_names)
     rename: Dict[str, str] = {}
     unmapped: List[str] = []
+    targets: Dict[str, str] = {}
     taken = set()
 
-    for original in bone_names:
+    # Pas 1: aflam ce nume vrea fiecare os si rezervam numele oaselor care
+    # raman neschimbate - altfel un os care se cheama deja "pelvis" ar putea
+    # fi luat de "mixamorig:Hips", iar Blender ar produce un "pelvis.001".
+    for original in names:
         mapped = ue_name(original)
         if mapped is None:
             unmapped.append(original)
-            if not keep_unmapped:
-                continue
-            mapped = strip_prefix(original)
-        if not mapped or mapped in taken:
+            mapped = strip_prefix(original) if keep_unmapped else original
+        targets[original] = mapped
+        if not mapped or mapped == original:
+            taken.add(original)
+
+    # Pas 2: dam numele noi, sarind peste cele deja ocupate.
+    for original in names:
+        mapped = targets[original]
+        if not mapped or mapped == original or mapped in taken:
             continue
         taken.add(mapped)
-        if mapped != original:
-            rename[original] = mapped
+        rename[original] = mapped
 
     return rename, unmapped

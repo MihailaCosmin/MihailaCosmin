@@ -2,12 +2,14 @@
 
 import ast
 import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,7 +28,8 @@ from mixamo2mh.bone_map import (
     strip_prefix,
     ue_name,
 )
-from mixamo2mh.cli import build_parser, settings_from_args
+from mixamo2mh.blender import FileResult
+from mixamo2mh.cli import build_parser, main as cli_main, settings_from_args
 from mixamo2mh.settings import (
     MODE_CHARACTER,
     ROOT_EXTRACT,
@@ -93,6 +96,24 @@ class TestBoneMap(unittest.TestCase):
         rename, _ = build_rename_map(["pelvis", "mixamorig:Hips"])
         self.assertNotIn("mixamorig:Hips", rename)
 
+    def test_collision_is_skipped_in_both_orders(self):
+        # un os deja numit "pelvis" trebuie sa isi pastreze numele, indiferent
+        # daca apare inainte sau dupa "Hips" in lista scheletului
+        for names in (["pelvis", "mixamorig:Hips"], ["mixamorig:Hips", "pelvis"]):
+            rename, _ = build_rename_map(names)
+            self.assertNotIn("mixamorig:Hips", rename, str(names))
+            self.assertEqual(rename, {}, str(names))
+
+    def test_partial_conversion_does_not_duplicate_names(self):
+        # schelet convertit pe jumatate: nimeni nu trebuie sa primeasca un nume
+        # pe care il poarta deja alt os
+        names = ["pelvis", "spine_01", "mixamorig:Hips", "mixamorig:Spine",
+                 "mixamorig:LeftArm"]
+        rename, _ = build_rename_map(names)
+        final = [rename.get(n, n) for n in names]
+        self.assertEqual(len(final), len(set(final)), final)
+        self.assertEqual(rename, {"mixamorig:LeftArm": "upperarm_l"})
+
     def test_already_converted_skeleton_is_a_noop(self):
         rename, _ = build_rename_map(["pelvis", "spine_01", "thigh_l"])
         self.assertEqual(rename, {})
@@ -139,6 +160,49 @@ class TestSettings(unittest.TestCase):
     def test_output_path_uses_suffix(self):
         settings = self._valid(suffix="_UE5")
         self.assertEqual(settings.output_path(str(self.fbx)).name, "Walking_UE5.fbx")
+
+    def test_same_name_in_two_folders_gets_two_outputs(self):
+        walk = Path(self.tmp.name) / "walk"
+        run = Path(self.tmp.name) / "run"
+        for folder in (walk, run):
+            folder.mkdir()
+            (folder / "Walking.fbx").write_bytes(b"x")
+        settings = self._valid(inputs=[str(walk / "Walking.fbx"), str(run / "Walking.fbx")])
+
+        planned = settings.output_paths()
+        self.assertEqual(len(set(planned.values())), 2, "s-ar suprascrie unul pe altul")
+        self.assertEqual(planned[str(walk / "Walking.fbx")].name, "Walking_UE5.fbx")
+        self.assertEqual(planned[str(run / "Walking.fbx")].name, "run_Walking_UE5.fbx")
+
+    def test_three_way_name_clash_still_unique(self):
+        folders = []
+        for name in ("a", "b", "c"):
+            folder = Path(self.tmp.name) / name
+            folder.mkdir()
+            (folder / "Idle.fbx").write_bytes(b"x")
+            folders.append(str(folder / "Idle.fbx"))
+        settings = self._valid(inputs=folders)
+        self.assertEqual(len(set(settings.output_paths().values())), 3)
+
+    def test_distinct_names_are_left_alone(self):
+        second = Path(self.tmp.name) / "Run.fbx"
+        second.write_bytes(b"x")
+        settings = self._valid(inputs=[str(self.fbx), str(second)])
+        names = sorted(p.name for p in settings.output_paths().values())
+        self.assertEqual(names, ["Run_UE5.fbx", "Walking_UE5.fbx"])
+
+    def test_root_motion_needs_renamed_bones(self):
+        for mode in (ROOT_EXTRACT, "inplace"):
+            settings = self._valid(root_motion=mode, rename_bones=False)
+            self.assertTrue(any("redenumirea" in p for p in settings.validate()),
+                            "root motion fara redenumire ar esua in Blender (%s)" % mode)
+
+    def test_keep_works_without_renaming(self):
+        self.assertEqual(self._valid(root_motion=ROOT_KEEP, rename_bones=False).validate(), [])
+
+    def test_output_dir_that_is_a_file_is_rejected(self):
+        settings = self._valid(output_dir=str(self.fbx))
+        self.assertTrue(any("fisier" in p for p in settings.validate()))
 
     def test_roundtrip_json(self):
         settings = self._valid(mode=MODE_CHARACTER, root_motion=ROOT_KEEP, scale=0.01)
@@ -218,6 +282,18 @@ class TestBlenderHelpers(unittest.TestCase):
             plain.chmod(0o755)
             self.assertEqual(find_portable([Path(tmp)], windows=False), str(plain))
 
+    def test_explicit_app_bundle_is_accepted(self):
+        # pe macOS dialogul returneaza folderul "Blender.app", nu binarul
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "Blender.app"
+            binary = self._portable(bundle, "Contents/MacOS/Blender")
+            self.assertEqual(find_blender(str(bundle)), str(binary))
+
+    def test_explicit_empty_folder_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(BlenderNotFound):
+                find_blender(tmp)
+
     def test_no_window_flag_is_inert_off_windows(self):
         from mixamo2mh.blender import NO_WINDOW
         self.assertIsInstance(NO_WINDOW, int)
@@ -265,6 +341,23 @@ class TestUnrealScript(unittest.TestCase):
             ast.parse(target.read_text(encoding="utf-8"))
 
 
+class TestFileResult(unittest.TestCase):
+    def test_success(self):
+        result = FileResult(source="a.fbx", ok=True)
+        self.assertFalse(result.failed)
+        self.assertTrue(result.usable)
+
+    def test_skipped_is_not_a_failure(self):
+        result = FileResult(source="a.fbx", skipped=True)
+        self.assertFalse(result.failed, "un fisier sarit deliberat nu e o eroare")
+        self.assertTrue(result.usable, "fisierul existent ramane bun de folosit")
+
+    def test_real_failure(self):
+        result = FileResult(source="a.fbx", message="boom")
+        self.assertTrue(result.failed)
+        self.assertFalse(result.usable)
+
+
 class TestCli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -293,6 +386,49 @@ class TestCli(unittest.TestCase):
         self.assertEqual(settings.scale, 0.01)
         self.assertEqual(settings.mode, MODE_CHARACTER)
         self.assertEqual(settings.inputs, [str(self.fbx)])
+
+    def _run_cli(self, results, extra=()):
+        """Ruleaza CLI-ul cu un run_conversion simulat; returneaza (cod, iesire)."""
+        args = [str(self.fbx), "-o", self.tmp.name] + list(extra)
+        out = io.StringIO()
+        with mock.patch("mixamo2mh.cli.run_conversion", return_value=results):
+            with contextlib.redirect_stdout(out):
+                code = cli_main(args)
+        return code, out.getvalue()
+
+    def test_skipped_files_are_not_errors(self):
+        skipped = FileResult(source=str(self.fbx), output=str(self.fbx),
+                             skipped=True, message="Sarit: fisierul exista deja.")
+        code, out = self._run_cli([skipped])
+        self.assertEqual(code, 0, "sarirea unui fisier nu trebuie sa dea cod de eroare")
+        self.assertIn("sarite", out)
+        self.assertNotIn("esuat", out)
+
+    def test_real_failure_sets_exit_code(self):
+        failure = FileResult(source=str(self.fbx), message="ceva nu a mers")
+        code, out = self._run_cli([failure])
+        self.assertEqual(code, 1)
+        self.assertIn("esuat", out)
+
+    def test_skipped_files_reach_the_unreal_script(self):
+        existing = Path(self.tmp.name) / "Run_UE5.fbx"
+        existing.write_bytes(b"x")
+        skipped = FileResult(source=str(self.fbx), output=str(existing), skipped=True)
+        code, _ = self._run_cli([skipped], extra=["--unreal-script"])
+        self.assertEqual(code, 0)
+        script = Path(self.tmp.name) / "unreal_import.py"
+        self.assertTrue(script.is_file(), "scriptul trebuie generat si pentru fisiere sarite")
+        self.assertIn("Run_UE5.fbx", script.read_text(encoding="utf-8"))
+
+    def test_system_errors_are_reported_cleanly(self):
+        err = io.StringIO()
+        with mock.patch("mixamo2mh.cli.run_conversion",
+                        side_effect=PermissionError("acces interzis")):
+            with contextlib.redirect_stderr(err):
+                code = cli_main([str(self.fbx), "-o", self.tmp.name])
+        self.assertEqual(code, 4)
+        self.assertIn("acces interzis", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
 
     def test_missing_output_is_rejected(self):
         with open(os.devnull, "w") as quiet, contextlib.redirect_stderr(quiet):
